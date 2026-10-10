@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import warnings
 
 
-from .tools import compute_kplanar
+from .tools import compute_kplanar, outgoing_kz
 from .alternative import (
     incident,
     poynting_fluxes,
@@ -628,7 +628,9 @@ class Crystal:
             )
 
         self.k0 = 2 * np.pi / wavelength
-        self.kzi = np.conj(csqrt(self.k0**2 * self.epsi - kxi**2 - kyi**2))
+        self.kzi = outgoing_kz(
+            self.k0**2 * self.epsi - kxi**2 - kyi**2
+        )
 
 
     def poynting_flux_end(self, only_total=True):

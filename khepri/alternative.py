@@ -12,7 +12,7 @@
 import numpy as np
 from numpy.lib.scimath import sqrt as csqrt
 from numpy.linalg import inv, solve
-from .tools import convolution_matrix
+from .tools import convolution_matrix, outgoing_kz
 import logging
 from math import prod
 
@@ -43,7 +43,7 @@ def scattering_reflection(KX, KY, W0, V0, er, ur=1):
     arg = (ur*er*I-KX**2-KY**2)
     arg = np.diag(arg)
     arg = arg.astype('complex')
-    Kz = np.conj(csqrt(arg))
+    Kz = outgoing_kz(arg)
     eigenvals = np.hstack((1j*Kz, 1j*Kz))
     Wref = np.identity(2*N)
     Vref = Qref / eigenvals
@@ -68,7 +68,7 @@ def scattering_transmission(KX, KY, W0, V0, er, ur=1):
     arg = (er*ur*I-KX**2-KY**2) #arg is kz^2
     arg = np.diag(arg)
     arg = arg.astype('complex')
-    Kz = np.conj(csqrt(arg))
+    Kz = outgoing_kz(arg)
     eigenvals = np.hstack((1j*Kz, 1j*Kz))
     Wtrans = np.identity(2*N)
 
@@ -90,10 +90,7 @@ def free_space_eigenmodes(KX, KY):
     Q = P
     W = np.identity(2*N)
     arg = (I-KX**2-KY**2).astype('complex')
-    kz = np.diag(arg).copy()
-    mask = kz.real < 0
-    kz[mask] = -1j * np.sqrt(-kz[mask])
-    kz[~mask] = np.sqrt(kz[~mask])
+    kz = outgoing_kz(np.diag(arg))
     eigenvalues = np.hstack((1j*kz, 1j*kz))
     V = Q / eigenvalues 
     return W, V
@@ -143,10 +140,7 @@ def solve_uniform_layer(Kx, Ky, er, m_r = 1):
     Q = (er/m_r) * P
     W = np.identity(2*N)
     arg = (m_r*er*I-Kx**2-Ky**2)
-    kz = np.diag(arg).astype('complex')
-    mask = kz.real < 0
-    kz[mask] = -1j * np.sqrt(-kz[mask])
-    kz[~mask] = np.sqrt(kz[~mask])
+    kz = outgoing_kz(np.diag(arg))
     #Kz = np.conj(csqrt(np.diag(arg)))
     eigenvalues = np.hstack((1j*kz, 1j*kz))
     #mask = np.logical_or(eigenvalues.imag < 0.0, np.logical_and(np.isclose(eigenvalues.imag, 0.0), eigenvalues.real < 0.0))
@@ -234,7 +228,7 @@ def scattering_identity(pw, block=False):
 
 def poynting_fluxes(expansion, c_output, kp, wavelength, only_total=True, epsi=1, epse=1):
     k0 = 2 * np.pi / wavelength
-    kzi = np.conj(csqrt(k0**2*epsi-kp[0]**2-kp[1]**2)) / k0
+    kzi = outgoing_kz(k0**2*epsi-kp[0]**2-kp[1]**2) / k0
     sx, sy = np.split(c_output, 2)
     kx, ky, kz = expansion.k_vectors(kp, wavelength, epse)
     sz = - (kx * sx + ky * sy) / kz

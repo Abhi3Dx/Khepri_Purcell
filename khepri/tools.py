@@ -14,6 +14,31 @@ from itertools import product
 
 
 
+def outgoing_kz(kz_squared, atol=1e-12):
+    """Return the outgoing/decaying square-root branch used by Khepri.
+
+    Khepri propagates the +z branch with exp(-1j*kz*z). Therefore an
+    outgoing propagating wave uses Re(kz) >= 0, while a purely evanescent
+    +z wave uses Im(kz) <= 0 so that it decays with increasing z.
+
+    Only the SIGN of the square root is changed. The root is never complex
+    conjugated, so kz**2 remains exactly equal to kz_squared for complex
+    media as well.
+    """
+    scalar = np.ndim(kz_squared) == 0
+    kz = np.sqrt(np.asarray(kz_squared, dtype=np.complex128))
+
+    flip = np.real(kz) < -atol
+    on_imag_axis = np.abs(np.real(kz)) <= atol
+    flip |= on_imag_axis & (np.imag(kz) > 0.0)
+    kz = np.where(flip, -kz, kz)
+
+    if scalar:
+        return kz.item()
+    return kz
+
+
+
 def compute_kplanar(eps_inc, wavelength,theta_deg=0.0, phi_deg=0.0):
     phi = np.deg2rad(phi_deg)
     theta = np.deg2rad(theta_deg)
