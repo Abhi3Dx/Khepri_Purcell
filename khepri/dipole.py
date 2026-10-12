@@ -203,103 +203,151 @@ def dipole_fourier_current(
 # 2. ELECTROMAGNETIC SOURCE JUMP
 # ============================================================
 
+def _apply_inverse_epsilon_operator(
+    inverse_epsilon_operator,
+    Jz,
+):
+    """
+    Apply the source-layer inverse-permittivity Fourier operator
+    to the z-directed current hypervector.
+
+    For a uniform isotropic layer,
+
+        inverse_epsilon_operator = 1 / epsilon.
+
+    For a patterned isotropic RCWA layer, Khepri stores
+
+        IC = inv(C),
+
+    where C is the Fourier convolution matrix of epsilon(x,y).
+    """
+
+    Jz = _as_complex_1d(Jz, "Jz")
+
+    op = np.asarray(
+        inverse_epsilon_operator,
+        dtype=np.complex128,
+    )
+
+    if op.ndim == 0:
+        return op.item() * Jz
+
+    if op.ndim != 2:
+        raise ValueError(
+            "inverse_epsilon_operator must be a scalar or "
+            "a two-dimensional square matrix."
+        )
+
+    expected = (len(Jz), len(Jz))
+
+    if op.shape != expected:
+        raise ValueError(
+            "inverse_epsilon_operator has incompatible shape. "
+            f"Expected {expected}, got {op.shape}."
+        )
+
+    return op @ Jz
+
+
+def dipole_source_jump_xyz(
+    Jx,
+    Jy,
+    Jz,
+    Kx,
+    Ky,
+    inverse_epsilon_operator,
+):
+    """
+    Construct the complete electric-dipole source jump in Khepri's
+    transverse-field convention.
+
+    This is the scalar-isotropic specialization of the source
+    hypervector in Eqs. (B7)-(B8) of Dyakov et al.,
+    Phys. Rev. B 108, 155416 (2023).
+
+    Khepri's ``Expansion.k_vectors`` already returns Kx/k0 and Ky/k0.
+    For the scalar-isotropic layers used here,
+
+        eps_tilde_33 -> inverse_epsilon_operator.
+
+    Khepri uses
+
+        psi = [Ex, Ey, Ux, Uy],   U = -i H.
+
+    Therefore
+
+        Delta Ex = Kx * epsinv(Jz)
+        Delta Ey = Ky * epsinv(Jz)
+        Delta Ux = -i Jy
+        Delta Uy = +i Jx
+
+    Notes
+    -----
+    This implementation assumes the source layer is scalar and isotropic.
+    It does not implement a fully anisotropic epsilon tensor with nonzero
+    epsilon_13 or epsilon_23 blocks.
+    """
+
+    Jx = _as_complex_1d(Jx, "Jx")
+    Jy = _as_complex_1d(Jy, "Jy")
+    Jz = _as_complex_1d(Jz, "Jz")
+    Kx = _as_complex_1d(Kx, "Kx")
+    Ky = _as_complex_1d(Ky, "Ky")
+
+    for array, name in (
+        (Jy, "Jy"),
+        (Jz, "Jz"),
+        (Kx, "Kx"),
+        (Ky, "Ky"),
+    ):
+        _check_same_shape(Jx, array, "Jx", name)
+
+    epsinv_Jz = _apply_inverse_epsilon_operator(
+        inverse_epsilon_operator,
+        Jz,
+    )
+
+    delta_Ex = Kx * epsinv_Jz
+    delta_Ey = Ky * epsinv_Jz
+    delta_Ux = -1j * Jy
+    delta_Uy = +1j * Jx
+
+    return np.concatenate(
+        [
+            delta_Ex,
+            delta_Ey,
+            delta_Ux,
+            delta_Uy,
+        ]
+    )
+
+
 def dipole_source_jump_xy(
     Jx,
     Jy,
 ):
     """
-    Construct the source jump for an in-plane electric dipole
-    using Khepri's transverse-field convention.
+    Backward-compatible wrapper for the validated in-plane source.
 
-    Khepri's transverse state is
+    This remains exactly
 
-        psi = [Ex, Ey, Ux, Uy]
-
-    where numerical verification gives
-
-        U = -i H.
-
-    For an electric surface current,
-
-        Delta Hx = +Jy
-        Delta Hy = -Jx
-
-    therefore
-
-        Delta Ux = -i Jy
-        Delta Uy = +i Jx.
-
-    Hence
-
-        b = [
-            Delta Ex,
-            Delta Ey,
-            Delta Ux,
-            Delta Uy
-        ]
-
-          = [
-            0,
-            0,
-            -i Jy,
-            +i Jx
-        ].
-
-    Parameters
-    ----------
-    Jx, Jy : ndarray
-        Fourier components of the in-plane electric current.
-
-    Returns
-    -------
-    b : ndarray
-        Khepri source-jump vector with shape
-
-            (4 * N_G,)
-
-    Notes
-    -----
-    This function intentionally supports only x/y dipoles.
-
-    A z-oriented dipole requires additional terms involving
-    Kx, Ky and the appropriate Fourier permittivity operator.
+        b = [0, 0, -i Jy, +i Jx].
     """
 
-    Jx = _as_complex_1d(
-        Jx,
-        "Jx",
+    Jx = _as_complex_1d(Jx, "Jx")
+    Jy = _as_complex_1d(Jy, "Jy")
+    _check_same_shape(Jx, Jy, "Jx", "Jy")
+
+    zeros = np.zeros_like(Jx, dtype=np.complex128)
+
+    return dipole_source_jump_xyz(
+        Jx=Jx,
+        Jy=Jy,
+        Jz=zeros,
+        Kx=zeros,
+        Ky=zeros,
+        inverse_epsilon_operator=1.0,
     )
-
-    Jy = _as_complex_1d(
-        Jy,
-        "Jy",
-    )
-
-    _check_same_shape(
-        Jx,
-        Jy,
-        "Jx",
-        "Jy",
-    )
-
-
-    zeros = np.zeros_like(
-        Jx,
-        dtype=np.complex128,
-    )
-
-
-    b = np.concatenate(
-        [
-            zeros,        # Delta Ex
-            zeros,        # Delta Ey
-            -1j * Jy,     # Delta Ux
-            +1j * Jx,     # Delta Uy
-        ]
-    )
-
-
-    return b
 
 
 # ============================================================
@@ -348,19 +396,19 @@ def solve_dipole_source_plane(
     -------
     c_plus : ndarray
         Dipole-generated modal amplitudes travelling
-        toward +z / right / emergence.
+        toward +z / emergence.
 
     c_minus : ndarray
         Dipole-generated modal amplitudes travelling
-        toward -z / left / incidence.
+        toward -z / incidence.
 
     Notes
     -----
     The source-plane fields satisfy
 
-        psi_right - psi_left = b.
+        psi_plus_z - psi_minus_z = b.
 
-    Multiple reflections between the left and right parts of
+    Multiple reflections between the -z and +z parts of
     the structure are included self-consistently.
     """
 
@@ -459,14 +507,14 @@ def solve_dipole_source_plane(
     # Reflection operators seen from source plane
     # --------------------------------------------------------
 
-    # Wave travelling left sees this reflection operator.
-    R_left = Sl[
+    # Wave travelling toward -z sees this reflection operator.
+    R_minus_z = Sl[
         1,
         1,
     ]
 
-    # Wave travelling right sees this reflection operator.
-    R_right = Sr[
+    # Wave travelling toward +z sees this reflection operator.
+    R_plus_z = Sr[
         0,
         0,
     ]
@@ -479,9 +527,9 @@ def solve_dipole_source_plane(
     #
     # gives:
     #
-    # c_plus - R_left c_minus = s_plus
+    # c_plus - R_minus_z c_minus = s_plus
     #
-    # R_right c_plus - c_minus = s_minus
+    # R_plus_z c_plus - c_minus = s_minus
     # --------------------------------------------------------
 
     I = np.eye(
@@ -494,10 +542,10 @@ def solve_dipole_source_plane(
         [
             [
                 I,
-                -R_left,
+                -R_minus_z,
             ],
             [
-                R_right,
+                R_plus_z,
                 -I,
             ],
         ]
@@ -551,7 +599,7 @@ def dipole_source_plane_fields(
         Khepri reference eigenbasis matrix.
 
     Sl, Sr : ndarray
-        Left and right partial scattering matrices.
+        -z and +z partial scattering matrices.
 
     c_plus : ndarray
         Dipole-generated wave travelling toward +z.
@@ -561,13 +609,13 @@ def dipole_source_plane_fields(
 
     Returns
     -------
-    psi_left : ndarray
-        Fourier field state immediately to the left of source:
+    psi_minus_z : ndarray
+        Fourier field state at z = z0 - 0:
 
             [Ex, Ey, Ux, Uy].
 
-    psi_right : ndarray
-        Fourier field state immediately to the right of source:
+    psi_plus_z : ndarray
+        Fourier field state at z = z0 + 0:
 
             [Ex, Ey, Ux, Uy].
 
@@ -575,7 +623,7 @@ def dipole_source_plane_fields(
     -----
     These fields should satisfy
 
-        psi_right - psi_left = b
+        psi_plus_z - psi_minus_z = b
 
     where b is the source jump used in
     ``solve_dipole_source_plane``.
@@ -615,68 +663,68 @@ def dipole_source_plane_fields(
     )
 
 
-    R_left = Sl[
+    R_minus_z = Sl[
         1,
         1,
     ]
 
-    R_right = Sr[
+    R_plus_z = Sr[
         0,
         0,
     ]
 
 
     # --------------------------------------------------------
-    # LEFT side of source
+    # -z side of source: z = z0 - 0
     #
     # +z component:
-    #     reflection of c_minus from left stack
+    #     reflection of c_minus from the -z stack
     #
     # -z component:
     #     directly emitted c_minus
     # --------------------------------------------------------
 
-    left_modal = np.concatenate(
+    minus_z_modal = np.concatenate(
         [
-            R_left @ c_minus,
+            R_minus_z @ c_minus,
             c_minus,
         ]
     )
 
 
-    psi_left = (
+    psi_minus_z = (
         R0
         @
-        left_modal
+        minus_z_modal
     )
 
 
     # --------------------------------------------------------
-    # RIGHT side of source
+    # +z side of source: z = z0 + 0
     #
     # +z component:
     #     directly emitted c_plus
     #
     # -z component:
-    #     reflection of c_plus from right stack
+    #     reflection of c_plus from the +z stack
     # --------------------------------------------------------
 
-    right_modal = np.concatenate(
+    plus_z_modal = np.concatenate(
         [
             c_plus,
-            R_right @ c_plus,
+            R_plus_z @ c_plus,
         ]
     )
 
 
-    psi_right = (
+    psi_plus_z = (
         R0
         @
-        right_modal
+        plus_z_modal
     )
 
 
-    return psi_left, psi_right
+    return psi_minus_z, psi_plus_z
 
 
 # ============================================================
@@ -696,10 +744,10 @@ def dipole_exterior_amplitudes(
     Parameters
     ----------
     Sl : ndarray
-        Left partial scattering matrix.
+        -z-side partial scattering matrix.
 
     Sr : ndarray
-        Right partial scattering matrix.
+        +z-side partial scattering matrix.
 
     c_plus : ndarray
         Source wave travelling toward +z.
@@ -1099,8 +1147,8 @@ def dipole_nearfield_flux(
 # ============================================================
 
 def dipole_total_nearfield_power(
-    psi_left,
-    psi_right,
+    psi_minus_z,
+    psi_plus_z,
 ):
     """
     Calculate the total Khepri-normalized power leaving the
@@ -1108,61 +1156,61 @@ def dipole_total_nearfield_power(
 
     Coordinate convention:
 
-        +z -> right / emergence
-        -z -> left  / incidence
+        psi_minus_z is evaluated at z = z0 - 0
+        psi_plus_z  is evaluated at z = z0 + 0
 
-    Therefore:
+    Therefore the outward powers are:
 
-        P_left  = -Sz_left
-        P_right = +Sz_right
+        P_minus_z = -Sz(z0 - 0)
+        P_plus_z  = +Sz(z0 + 0)
 
     Parameters
     ----------
-    psi_left : ndarray
-        Field state immediately to the left of the source.
+    psi_minus_z : ndarray
+        Field state at z = z0 - 0.
 
-    psi_right : ndarray
-        Field state immediately to the right of the source.
+    psi_plus_z : ndarray
+        Field state at z = z0 + 0.
 
     Returns
     -------
-    P_left : float
+    P_minus_z : float
         Outward power emitted toward -z.
 
-    P_right : float
+    P_plus_z : float
         Outward power emitted toward +z.
 
     P_total : float
         Sum of the two outward fluxes.
     """
 
-    Sz_left = dipole_nearfield_flux(
-        psi_left
+    Sz_minus_z = dipole_nearfield_flux(
+        psi_minus_z
     )
 
-    Sz_right = dipole_nearfield_flux(
-        psi_right
+    Sz_plus_z = dipole_nearfield_flux(
+        psi_plus_z
     )
 
 
-    P_left = float(
-        -Sz_left
+    P_minus_z = float(
+        -Sz_minus_z
     )
 
-    P_right = float(
-        Sz_right
+    P_plus_z = float(
+        Sz_plus_z
     )
 
     P_total = (
-        P_left
+        P_minus_z
         +
-        P_right
+        P_plus_z
     )
 
 
     return (
-        P_left,
-        P_right,
+        P_minus_z,
+        P_plus_z,
         P_total,
     )
 
@@ -1235,7 +1283,7 @@ def dipole_power_q(
 
             (jx, jy, jz)
 
-        Only x/y-oriented dipoles are currently supported.
+        x-, y-, and z-oriented electric dipoles are supported for scalar-isotropic source layers.
 
     backend : str
         Khepri solver backend.
@@ -1256,9 +1304,12 @@ def dipole_power_q(
 
         Always contains:
 
-            result["P_left"]
-            result["P_right"]
+            result["P_minus_z"]
+            result["P_plus_z"]
             result["P_total"]
+
+        Legacy aliases ``P_left`` and ``P_right`` are retained for
+        backward compatibility.
 
         where these are Khepri-normalized near-source power
         fluxes.
@@ -1273,7 +1324,7 @@ def dipole_power_q(
 
     This is NOT an absolute power in watts.
 
-    z-oriented electric dipoles are not implemented yet.
+    z-oriented electric dipoles use the source-layer inverse-permittivity operator.
     """
 
     # --------------------------------------------------------
@@ -1285,11 +1336,6 @@ def dipole_power_q(
             "current must contain exactly (jx, jy, jz)."
         )
 
-    if abs(current[2]) > 1e-14:
-        raise NotImplementedError(
-            "z-oriented electric dipoles are not implemented "
-            "yet. Use current=(jx, jy, 0)."
-        )
 
 
     # --------------------------------------------------------
@@ -1408,11 +1454,41 @@ def dipole_power_q(
 
     # --------------------------------------------------------
     # Build Maxwell source jump
+    #
+    # For Jz != 0 we need the inverse-permittivity Fourier
+    # operator of the physical layer containing the source.
+    # ``source_after`` is the split layer immediately on the
+    # z0-0 side of the dipole plane.
     # --------------------------------------------------------
 
-    b = dipole_source_jump_xy(
-        Jx,
-        Jy,
+    if abs(current[2]) > 1e-14:
+        source_layer = crystal.layers[source_after]
+
+        inverse_epsilon_operator = getattr(
+            source_layer,
+            "IC",
+            None,
+        )
+
+        if inverse_epsilon_operator is None:
+            raise RuntimeError(
+                "A z-oriented dipole requires the inverse-permittivity "
+                "operator of the source layer, but source_layer.IC is "
+                "not available. Retain fields for the layer immediately "
+                "before the dipole plane, e.g. fields_mask=[True, False] "
+                "for a two-half split layer."
+            )
+    else:
+        # For Jz=0 the operator is multiplied by zero and is irrelevant.
+        inverse_epsilon_operator = 1.0
+
+    b = dipole_source_jump_xyz(
+        Jx=Jx,
+        Jy=Jy,
+        Jz=Jz,
+        Kx=Kx,
+        Ky=Ky,
+        inverse_epsilon_operator=inverse_epsilon_operator,
     )
 
 
@@ -1432,7 +1508,7 @@ def dipole_power_q(
     # Reconstruct fields immediately around dipole
     # --------------------------------------------------------
 
-    psi_left, psi_right = dipole_source_plane_fields(
+    psi_minus_z, psi_plus_z = dipole_source_plane_fields(
         R0=R0,
         Sl=Sl,
         Sr=Sr,
@@ -1449,12 +1525,12 @@ def dipole_power_q(
     # --------------------------------------------------------
 
     (
-        P_left,
-        P_right,
+        P_minus_z,
+        P_plus_z,
         P_total,
     ) = dipole_total_nearfield_power(
-        psi_left,
-        psi_right,
+        psi_minus_z,
+        psi_plus_z,
     )
 
 
@@ -1463,9 +1539,9 @@ def dipole_power_q(
     # --------------------------------------------------------
 
     jump_difference = (
-        psi_right
+        psi_plus_z
         -
-        psi_left
+        psi_minus_z
         -
         b
     )
@@ -1501,9 +1577,14 @@ def dipole_power_q(
     # --------------------------------------------------------
 
     result = {
-        "P_left": float(P_left),
-        "P_right": float(P_right),
+        # Canonical z-direction notation
+        "P_minus_z": float(P_minus_z),
+        "P_plus_z": float(P_plus_z),
         "P_total": float(P_total),
+
+        # Backward-compatible aliases
+        "P_left": float(P_minus_z),
+        "P_right": float(P_plus_z),
     }
 
 
@@ -1524,6 +1605,9 @@ def dipole_power_q(
                 "Jy": Jy,
                 "Jz": Jz,
 
+                "inverse_epsilon_operator":
+                    inverse_epsilon_operator,
+
                 "b": b,
 
                 "Sl": Sl,
@@ -1534,8 +1618,13 @@ def dipole_power_q(
                 "c_plus": c_plus,
                 "c_minus": c_minus,
 
-                "psi_left": psi_left,
-                "psi_right": psi_right,
+                # Canonical z-direction notation
+                "psi_minus_z": psi_minus_z,
+                "psi_plus_z": psi_plus_z,
+
+                # Backward-compatible aliases
+                "psi_left": psi_minus_z,
+                "psi_right": psi_plus_z,
 
                 "jump_relative_error":
                     float(jump_relative_error),
@@ -1581,7 +1670,7 @@ def dipole_power_map(
     current : tuple
         Dipole current (jx, jy, jz).
 
-        Currently only in-plane dipoles are supported.
+        x-, y-, and z-oriented dipoles are supported for scalar-isotropic source layers.
 
     backend : str
         Khepri backend. Intended for "dense".
@@ -1630,12 +1719,12 @@ def dipole_power_map(
         len(qx_values),
     )
 
-    P_left = np.zeros(
+    P_minus_z = np.zeros(
         shape,
         dtype=float,
     )
 
-    P_right = np.zeros(
+    P_plus_z = np.zeros(
         shape,
         dtype=float,
     )
@@ -1683,18 +1772,18 @@ def dipole_power_map(
                 return_details=False,
             )
 
-            P_left[
+            P_minus_z[
                 iy,
                 ix
             ] = result_q[
-                "P_left"
+                "P_minus_z"
             ]
 
-            P_right[
+            P_plus_z[
                 iy,
                 ix
             ] = result_q[
-                "P_right"
+                "P_plus_z"
             ]
 
             P_total[
@@ -1707,63 +1796,37 @@ def dipole_power_map(
     return {
         "qx": qx_values,
         "qy": qy_values,
-        "P_left": P_left,
-        "P_right": P_right,
+        "P_minus_z": P_minus_z,
+        "P_plus_z": P_plus_z,
         "P_total": P_total,
+
+        # Backward-compatible aliases
+        "P_left": P_minus_z,
+        "P_right": P_plus_z,
     }
 
 
 
 # ============================================================
-# 11. HOMOGENEOUS REFERENCE POWER FOR IN-PLANE DIPOLE
+# 11. HOMOGENEOUS REFERENCE POWER
 # ============================================================
 
-def homogeneous_reference_power_xy(
+def homogeneous_reference_power(
     wavelength,
     refractive_index,
     current,
 ):
     """
-    Exact homogeneous-medium reference power for an in-plane
-    electric dipole in the normalization used by the Khepri
-    dipole implementation.
+    Exact homogeneous-medium reference power in Khepri's dipole
+    normalization.
 
-    Parameters
-    ----------
-    wavelength : float
-        Vacuum wavelength.
+    For an isotropic homogeneous medium,
 
-    refractive_index : float
-        Refractive index of the homogeneous reference medium.
+        P_ref = k0^2 n / (6 pi)
+                * (|Jx|^2 + |Jy|^2 + |Jz|^2).
 
-    current : tuple
-        Electric-current amplitude
-
-            (jx, jy, jz)
-
-        Only jz = 0 is currently supported.
-
-    Returns
-    -------
-    P_ref : float
-        Exact homogeneous reference power.
-
-    Notes
-    -----
-    For an in-plane dipole,
-
-        P_ref =
-            k0^2 n / (6 pi)
-            * (|Jx|^2 + |Jy|^2)
-
-    where
-
-        k0 = 2 pi / wavelength.
-
-    This is in the same normalized convention used by the
-    current Khepri dipole implementation.
-
-    It is not an absolute power in watts.
+    Equal-amplitude x, y, and z dipoles therefore have the same
+    integrated homogeneous reference power.
     """
 
     if len(current) != 3:
@@ -1771,61 +1834,51 @@ def homogeneous_reference_power_xy(
             "current must contain exactly (jx, jy, jz)."
         )
 
-    jx, jy, jz = current
-
-    if abs(jz) > 1e-14:
-        raise NotImplementedError(
-            "The homogeneous reference currently supports "
-            "only in-plane x/y dipoles."
-        )
-
     if wavelength <= 0:
-        raise ValueError(
-            "wavelength must be positive."
-        )
+        raise ValueError("wavelength must be positive.")
 
     if refractive_index <= 0:
-        raise ValueError(
-            "refractive_index must be positive."
-        )
+        raise ValueError("refractive_index must be positive.")
 
-    k0 = (
-        2.0
-        *
-        np.pi
-        /
-        wavelength
-    )
+    jx, jy, jz = current
 
     current_squared = (
         abs(jx)**2
-        +
-        abs(jy)**2
+        + abs(jy)**2
+        + abs(jz)**2
     )
 
     if current_squared == 0:
-        raise ValueError(
-            "The in-plane dipole current cannot be zero."
-        )
+        raise ValueError("The dipole current cannot be zero.")
+
+    k0 = 2.0 * np.pi / wavelength
 
     P_ref = (
         k0**2
-        *
-        refractive_index
-        /
-        (
-            6.0
-            *
-            np.pi
-        )
-        *
-        current_squared
+        * refractive_index
+        / (6.0 * np.pi)
+        * current_squared
     )
 
-    return float(
-        np.real(
-            P_ref
-        )
+    return float(np.real(P_ref))
+
+
+def homogeneous_reference_power_xy(
+    wavelength,
+    refractive_index,
+    current,
+):
+    """
+    Backward-compatible alias for ``homogeneous_reference_power``.
+
+    The historical function name is retained so existing scripts keep
+    working, but z-oriented dipoles are now supported too.
+    """
+
+    return homogeneous_reference_power(
+        wavelength=wavelength,
+        refractive_index=refractive_index,
+        current=current,
     )
 
 
@@ -2534,12 +2587,12 @@ def dipole_power_map_unitcell(
 
     Nv_eff, Nu_eff = qx.shape
 
-    P_left = np.empty(
+    P_minus_z = np.empty(
         (Nv_eff, Nu_eff),
         dtype=float,
     )
 
-    P_right = np.empty(
+    P_plus_z = np.empty(
         (Nv_eff, Nu_eff),
         dtype=float,
     )
@@ -2598,15 +2651,15 @@ def dipole_power_map_unitcell(
                     f"qx={qx_ij:+.12g}, qy={qy_ij:+.12g}."
                 ) from exc
 
-            p_left = float(np.real(point_result["P_left"]))
-            p_right = float(np.real(point_result["P_right"]))
+            p_minus_z = float(np.real(point_result["P_minus_z"]))
+            p_plus_z = float(np.real(point_result["P_plus_z"]))
             p_total = float(np.real(point_result["P_total"]))
 
             if not np.all(
                 np.isfinite(
                     [
-                        p_left,
-                        p_right,
+                        p_minus_z,
+                        p_plus_z,
                         p_total,
                     ]
                 )
@@ -2621,8 +2674,8 @@ def dipole_power_map_unitcell(
                     "condition or an ill-conditioned pole."
                 )
 
-            P_left[iv, iu] = p_left
-            P_right[iv, iu] = p_right
+            P_minus_z[iv, iu] = p_minus_z
+            P_plus_z[iv, iu] = p_plus_z
             P_total[iv, iu] = p_total
 
             if return_point_details:
@@ -2632,9 +2685,13 @@ def dipole_power_map_unitcell(
 
     result.update(
         {
-            "P_left": P_left,
-            "P_right": P_right,
+            "P_minus_z": P_minus_z,
+            "P_plus_z": P_plus_z,
             "P_total": P_total,
+
+            # Backward-compatible aliases
+            "P_left": P_minus_z,
+            "P_right": P_plus_z,
         }
     )
 
@@ -2662,13 +2719,19 @@ def integrate_dipole_power_unitcell(
     over one complete reciprocal primitive cell.
     """
 
+    component_aliases = {
+        "P_left": "P_minus_z",
+        "P_right": "P_plus_z",
+    }
+    component = component_aliases.get(component, component)
+
     if component not in (
         "P_total",
-        "P_left",
-        "P_right",
+        "P_minus_z",
+        "P_plus_z",
     ):
         raise ValueError(
-            "component must be 'P_total', 'P_left', or 'P_right'."
+            "component must be 'P_total', 'P_minus_z', or 'P_plus_z'."
         )
 
     if "integration_weight" not in map_result:
