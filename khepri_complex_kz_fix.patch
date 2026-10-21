@@ -1,0 +1,99 @@
+diff --git a/khepri/tools.py b/khepri/tools.py
+--- a/khepri/tools.py
++++ b/khepri/tools.py
+@@
+ from .constants import *
+@@
+ from itertools import product
+ 
++
++def outgoing_kz(kz_squared, atol=1e-12):
++    """Return the Khepri outgoing/decaying branch of ``sqrt(kz_squared)``.
++
++    Khepri propagates a +z mode with ``exp(-1j*kz*z)``.  Therefore:
++
++    * propagating modes use the root with Re(kz) >= 0;
++    * purely evanescent modes use the root with Im(kz) <= 0.
++
++    Crucially, this function changes the *sign* of a square root when needed;
++    it never complex-conjugates the root.  Hence ``kz**2`` always remains
++    equal to ``kz_squared`` for complex media.
++
++    With Khepri's time/propagation convention a passive dielectric is entered
++    with Im(epsilon) <= 0.  For example, the PRB paper's ``+0.001i`` loss
++    (written in the opposite harmonic convention) must be supplied to Khepri
++    as ``-0.001j``.
++    """
++    scalar = np.ndim(kz_squared) == 0
++    kz = np.sqrt(np.asarray(kz_squared, dtype=np.complex128))
++
++    # Select the outgoing root.  For a non-zero real part, positive Re(kz)
++    # fixes the propagation direction.  On the imaginary axis, choose the
++    # negative-imaginary root so exp(-i*kz*z) decays for +z.
++    flip = np.real(kz) < -atol
++    on_imag_axis = np.abs(np.real(kz)) <= atol
++    flip |= on_imag_axis & (np.imag(kz) > 0.0)
++    kz = np.where(flip, -kz, kz)
++
++    if scalar:
++        return kz.item()
++    return kz
++
+ 
+ def compute_kplanar(eps_inc, wavelength,theta_deg=0.0, phi_deg=0.0):
+@@
+diff --git a/khepri/alternative.py b/khepri/alternative.py
+--- a/khepri/alternative.py
++++ b/khepri/alternative.py
+@@
+-from .tools import convolution_matrix
++from .tools import convolution_matrix, outgoing_kz
+@@
+-    Kz = np.conj(csqrt(arg))
++    Kz = outgoing_kz(arg)
+@@
+-    Kz = np.conj(csqrt(arg))
++    Kz = outgoing_kz(arg)
+@@
+-    kz = np.diag(arg).copy()
+-    mask = kz.real < 0
+-    kz[mask] = -1j * np.sqrt(-kz[mask])
+-    kz[~mask] = np.sqrt(kz[~mask])
++    kz = outgoing_kz(np.diag(arg))
+@@
+-    kz = np.diag(arg).astype('complex')
+-    mask = kz.real < 0
+-    kz[mask] = -1j * np.sqrt(-kz[mask])
+-    kz[~mask] = np.sqrt(kz[~mask])
++    kz = outgoing_kz(np.diag(arg))
+@@
+-    kzi = np.conj(csqrt(k0**2*epsi-kp[0]**2-kp[1]**2)) / k0
++    kzi = outgoing_kz(k0**2*epsi-kp[0]**2-kp[1]**2) / k0
+ diff --git a/khepri/expansion.py b/khepri/expansion.py
+--- a/khepri/expansion.py
++++ b/khepri/expansion.py
+@@
+-from .tools import rotation_matrix, reciproc, unitcellarea
++from .tools import rotation_matrix, reciproc, unitcellarea, outgoing_kz
+@@
+ def kz_from_kplanar(kx, ky, k0, epsilon):
+-    arg = k0**2 * np.conj(epsilon) - kx**2 - ky**2
+-    kz = np.conj(np.sqrt(arg.astype("complex")))
+-    #kz = arg.astype("complex")
+-    #mask = kz.real < 0
+-    #kz[mask] = -1j * np.sqrt(-kz[mask])
+-    #kz[~mask] = np.sqrt(kz[~mask])
+-    return kz
++    arg = k0**2 * epsilon - kx**2 - ky**2
++    return outgoing_kz(arg)
+ diff --git a/khepri/crystal.py b/khepri/crystal.py
+--- a/khepri/crystal.py
++++ b/khepri/crystal.py
+@@
+-from .tools import compute_kplanar
++from .tools import compute_kplanar, outgoing_kz
+@@
+-        self.kzi = np.conj(csqrt(self.k0**2 * self.epsi - kxi**2 - kyi**2))
++        self.kzi = outgoing_kz(
++            self.k0**2 * self.epsi - kxi**2 - kyi**2
++        )
